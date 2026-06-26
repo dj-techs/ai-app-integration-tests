@@ -563,3 +563,22 @@ context_for_next_session:
 decisions_made: []
 followups: []
 ---
+
+---
+session: 2026-06-26T04:00Z
+duration_min: 12
+issue: 52
+focus: collectheaders_array_path_string_coerce_parity_with_object_path
+phase: night_session_phase_b_issue_11
+delta:
+  files_changed: 2 # src/fetch-recorder.ts + test/record-replay.test.ts
+  tests_added: 2   # non-string array header coerced + string array header unchanged
+context_for_next_session:
+  - found_via_night_phase_a_dogfood_explore_agent_hand_verified_collectheaders_fetch_recorder_61_returns_record_string_string_object_path_77_string_coerces_array_path_74_stored_raw
+  - root_cause_array_of_tuples_path_for_k_v_of_headers_out_eq_v_no_coercion_untyped_js_caller_x_count_5_array_stores_number_object_path_already_string_v_because_author_anticipated_non_string_values
+  - harm_non_string_value_flows_into_normalized_headers_on_disk_cassette_request_headers_cassettev1_violates_record_string_string_contract_plus_spurious_cassette_miss_hashrequest_number_vs_string
+  - fix_one_line_string_v_on_array_path_line_74_matching_object_path_77
+  - tests_record_via_createrecorderfetch_array_header_non_string_5_cassette_stores_string_5_typeof_string_plus_string_array_header_unchanged_typecheck_lint_full_vitest_186_green
+  - skipped_a_second_agent_finding_github_gists_updategistfile_description_not_trimmed_debatable_description_is_free_text_content_not_a_validate_use_mismatch_like_56_trimming_could_be_lossy_passed_on_it
+decisions_made: []
+followups: []
