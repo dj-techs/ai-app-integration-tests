@@ -102,10 +102,11 @@ Two checks run before any cassette is written:
    `anthropic-api-key`, `openai-api-key`, `cookie`, etc.) with the
    string `[REDACTED]`.
 2. **Body scan.** `assertNoLeakedSecrets()` serializes the entire
-   cassette and rejects on three regexes: `sk-...`, `sk-ant-...`, and
-   `Bearer <token>`. The check is intentionally broad — false positives
-   are recoverable (rename the variable in your test); false negatives
-   commit a credential to git.
+   cassette and rejects on six regexes: `sk-...`, `sk-ant-...`,
+   `Bearer <token>`, Google `AIza...` keys (#22), HTTP `Basic ...`
+   credentials (#54), and URL userinfo `//user:pass@` (#64). The check
+   is intentionally broad — false positives are recoverable (rename the
+   variable in your test); false negatives commit a credential to git.
 
 The CI job `no-leaked-secrets` re-runs the body scan against every
 committed cassette so a new leak in any future cassette fails the build.

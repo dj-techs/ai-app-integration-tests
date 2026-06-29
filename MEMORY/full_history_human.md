@@ -464,3 +464,14 @@ or a new fingerprint shape if one is identified.
 **Open questions / blockers:** none.
 
 **Next session:** continue the loop if time remains. Secondary low-confidence note (not filed): `hashRequest` collides a no-body request with one whose body is the literal JSON `null` — same class as #57, only reachable for the unusual literal-`null` body.
+
+## 2026-06-29 — Issue #66: architecture.md said three redaction regexes, but six ship
+**Duration:** ~9 min · **Branch:** `session/2026-06-29-0403-arch-redaction-regex-count`
+
+- `docs/architecture.md` said the cassette body scan rejects on "three regexes" (sk-/sk-ant-/Bearer), but `API_KEY_PATTERNS` is six — AIza (#22), Basic (#54), and URL userinfo (#64) were added later without updating the doc. Enumerated all six. The matching phrasing in `core_decisions_human.md` is append-only decision history (the patterns extended D-004), left as-is.
+
+**Why this work, this session:** eleventh issue of the night run, from the second parallel doc-contract subagent batch.
+
+**Open questions / blockers:** none.
+
+**Next session:** the documented redaction-regex count matches the shipped `API_KEY_PATTERNS`.

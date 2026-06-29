@@ -710,3 +710,21 @@ context_for_next_session:
 decisions_made: []
 followups: []
 ---
+
+---
+session: 2026-06-29T04:03Z
+issue: 66
+focus: architecture_md_body_scan_three_regexes_but_api_key_patterns_is_six
+phase: night_session_phase_b_iteration_11
+duration_min: 9
+delta:
+  files_changed: 1 # docs/architecture.md
+  tests_added: 0   # doc-only count correction
+context_for_next_session:
+  - architecture_md_104_105_said_assertnoleakedsecrets_rejects_on_three_regexes_sk_sk_ant_bearer_but_api_key_patterns_cassette_ts_214_239_is_six_aiza_22_basic_54_url_userinfo_user_pass_at_64_added_later_without_updating_doc_count
+  - fix_enumerated_all_six_in_architecture_md_each_cross_referenced_to_adding_issue_core_decisions_human_md_45_matching_three_regexes_phrasing_left_as_is_append_only_decision_history_patterns_extended_d_004_not_superseded
+  - each_new_pattern_body_leak_locked_by_test_cassette_ts_aiza_293_basic_308_335_366_url_userinfo_379_test_architecture_doc_ts_checks_paths_banned_phrases_decisions_issue_refs_not_regex_count_so_drift_slipped
+  - eleventh_issue_this_night_run_vitest_205_green_doc_only
+decisions_made: []
+followups: []
+---
