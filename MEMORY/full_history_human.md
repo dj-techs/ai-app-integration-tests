@@ -475,3 +475,15 @@ or a new fingerprint shape if one is identified.
 **Open questions / blockers:** none.
 
 **Next session:** the documented redaction-regex count matches the shipped `API_KEY_PATTERNS`.
+
+## 2026-06-29 — Issue #68: recorder/replayer crashed on null-body statuses (204/205/304)
+**Duration:** ~25 min · **Branch:** `session/2026-06-29-2353-issue-68`
+
+- Per the Fetch spec, a null-body status (204 No Content, 205 Reset Content, 304 Not Modified) forbids any response body — `new Response` throws a `TypeError` even for an empty-string body, only `null` is accepted. The recorder and replayer built `new Response(body, { status })` with `body === ""` for these statuses, so a valid 204 (e.g. a `DELETE`) crashed with a raw `TypeError` from inside `globalThis.fetch` instead of round-tripping. Every existing test used status 200, so the class was never exercised.
+- Reproduced both the record and replay crashes firsthand end-to-end, then fixed with a `NULL_BODY_STATUSES` set + `bodyForStatus(status, body)` helper returning `null` for those statuses, applied at all four `new Response(...)` sites (non-streaming record, SSE record, non-streaming replay, SSE replay). 3 lock tests (record+replay for 204/205/304), all confirmed failing pre-fix. Suite 205 → 208, tsc + eslint clean.
+
+**Why this work, this session:** fifth substantive issue of a multi-issue DAY run. Priority tier was exhausted, so rotated through non-tier repos; a dogfood hunter surfaced this spec-conformance crash, verified firsthand before acting.
+
+**Open questions / blockers:** none.
+
+**Next session:** continue the loop; this run's sweep found the portfolio otherwise deeply saturated (6 of 8 hunted repos clean).
