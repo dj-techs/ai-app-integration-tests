@@ -219,6 +219,21 @@ export function validateReplayerOptions(opts: ReplayerOptions): void {
 /* Recorder                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Per the Fetch spec a "null body status" (204 No Content, 205 Reset Content,
+ * 304 Not Modified) forbids ANY response body: the `Response` constructor throws
+ * a `TypeError` even for an empty-string body — only `null` is accepted. Recorded
+ * and replayed bodies for these statuses are always `""`, so every
+ * `new Response(body, { status })` site must coerce the body to `null` or the
+ * recorder/replayer crashes on a perfectly valid 204 (e.g. a DELETE) instead of
+ * round-tripping it.
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
+
+function bodyForStatus<T>(status: number, body: T): T | null {
+  return NULL_BODY_STATUSES.has(status) ? null : body;
+}
+
 export function createRecorderFetch(opts: RecorderOptions): typeof fetch {
   validateRecorderOptions(opts);
   const upstream = opts.upstream ?? globalThis.fetch;
@@ -257,7 +272,7 @@ export function createRecorderFetch(opts: RecorderOptions): typeof fetch {
         headers: redactHeaders(headersToObject(liveResponse.headers)),
         frames,
       };
-      cloneForCaller = new Response(replayBody, {
+      cloneForCaller = new Response(bodyForStatus(liveResponse.status, replayBody), {
         status: liveResponse.status,
         statusText: liveResponse.statusText,
         headers: liveResponse.headers,
@@ -270,7 +285,7 @@ export function createRecorderFetch(opts: RecorderOptions): typeof fetch {
         headers: redactHeaders(headersToObject(liveResponse.headers)),
         body: text,
       };
-      cloneForCaller = new Response(text, {
+      cloneForCaller = new Response(bodyForStatus(liveResponse.status, text), {
         status: liveResponse.status,
         statusText: liveResponse.statusText,
         headers: liveResponse.headers,
@@ -382,7 +397,10 @@ function rebuildResponse(recorded: RecordedResponse): Response {
   }
 
   if (recorded.kind === "non_streaming") {
-    return new Response(recorded.body, { status: recorded.status, headers });
+    return new Response(bodyForStatus(recorded.status, recorded.body), {
+      status: recorded.status,
+      headers,
+    });
   }
 
   // SSE: stream frames in order with no synthetic delay (deterministic-by-default).
@@ -393,5 +411,5 @@ function rebuildResponse(recorded: RecordedResponse): Response {
       controller.close();
     },
   });
-  return new Response(stream, { status: recorded.status, headers });
+  return new Response(bodyForStatus(recorded.status, stream), { status: recorded.status, headers });
 }
