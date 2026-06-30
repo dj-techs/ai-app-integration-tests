@@ -304,3 +304,41 @@ describe("non-intercepted hosts", () => {
     );
   });
 });
+
+describe("null-body statuses (204/205/304) round-trip without crashing (#68)", () => {
+  // Per the Fetch spec these statuses forbid ANY response body — `new Response`
+  // throws a TypeError even for an empty-string body, only `null` is allowed.
+  // Pre-fix both the record path (new Response(text, ...)) and the replay path
+  // (rebuildResponse) passed `""` and crashed on a perfectly valid 204 (e.g. a
+  // DELETE). Every other test uses status 200, so the class was never exercised.
+  let dir: string;
+  let store: CassetteStore;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "aiit-nullbody-"));
+    store = new CassetteStore({ dir });
+  });
+
+  for (const status of [204, 205, 304]) {
+    it(`records a ${status} upstream and replays it without throwing`, async () => {
+      const upstream: typeof fetch = async () =>
+        new Response(null, { status, headers: { "x-server": "fake" } });
+
+      const recorder = createRecorderFetch({ upstream, store, hosts: HOSTS });
+      const recorded = await recorder("https://api.anthropic.com/v1/messages/abc", {
+        method: "DELETE",
+        headers: { "x-api-key": "sk-ant-must-not-leak-1234567890abcdefghij" },
+      });
+      expect(recorded.status).toBe(status);
+      expect(await recorded.text()).toBe("");
+
+      const replayer = createReplayerFetch({ store, hosts: HOSTS });
+      const replayed = await replayer("https://api.anthropic.com/v1/messages/abc", {
+        method: "DELETE",
+        headers: { "x-api-key": "different-but-hash-stable" },
+      });
+      expect(replayed.status).toBe(status);
+      expect(await replayed.text()).toBe("");
+    });
+  }
+});
