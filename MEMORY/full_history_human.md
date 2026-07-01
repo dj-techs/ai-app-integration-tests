@@ -487,3 +487,15 @@ or a new fingerprint shape if one is identified.
 **Open questions / blockers:** none.
 
 **Next session:** continue the loop; this run's sweep found the portfolio otherwise deeply saturated (6 of 8 hunted repos clean).
+
+## 2026-07-01 — Issue #70: JSON-null request body collided with a no-body request (wrong replay)
+**Duration:** ~25 min · **Branch:** `session/2026-07-01-1928-issue-70`
+
+- `hashRequest` folded the `bodyEncoding` tag into the request hash only for *raw* bodies. A `POST` whose body is the JSON literal `null` normalizes to `{ body: null, bodyEncoding: "json" }`, and a request with no body normalizes to `{ body: null }` with no tag — both canonicalize to `body:null`, so dropping the `"json"` tag made them hash identically. The recorder then overwrote one cassette with the other and the replayer served the wrong response. It's the exact #57 raw-vs-JSON collision class, one value over: every *other* JSON body is non-null so can't collide with no-body, but a literal `null` slips through. Reproduced firsthand end-to-end (only one cassette written; the null-body request replayed the no-body response).
+- Fixed by widening the fold condition to also cover a present body that canonicalizes to `null` (`bodyEncoding !== undefined && body === null`). Only the buggy json-null hashes change; every non-null JSON-body, no-body, and raw hash stays byte-identical, so already-recorded cassettes still replay (the #57 backward-compat lock is preserved). +3 tests (hash-level, raw-hash-stable, end-to-end record+replay); suite 208 → 211, typecheck/build/eslint clean. Inverse safety net confirmed via `git stash`.
+
+**Why this work, this session:** second issue of the DAY run. `ai-app-integration-tests` was the stalest repo overall (40h, over the 36h floor) with only a binary-asset demo issue open, so a dogfood hunt drove the work. Of two parallel hunters, the support/flake-reduction modules came back clean and the recording core surfaced this genuine collision.
+
+**Open questions / blockers:** none — PR #71 ready for review.
+
+**Next session:** empty-string body (`""`) is currently treated as no-body (a length-0 guard in `normalizeRequest`); whether an empty POST body should be wire-distinct from no body is a separate, more debatable semantic — left unfiled. Continue the loop.
