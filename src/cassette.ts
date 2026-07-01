@@ -131,17 +131,24 @@ export function normalizeUrl(url: string): string {
 }
 
 export function hashRequest(req: NormalizedRequest): string {
-  // Fold `bodyEncoding` into the hash ONLY for raw bodies (#57). A raw body is
-  // stored as its plain text, which is indistinguishable from a JSON value of
-  // the same canonical shape once normalized — the collision between raw `foo`
-  // and JSON `{"__raw_body__":"foo"}` (old wrapper), or raw `foo` and JSON
-  // `"foo"`. Tagging only the raw case keeps every existing JSON-body and
-  // no-body hash byte-identical, so already-recorded cassettes still replay.
+  // Fold `bodyEncoding` into the hash for raw bodies (#57) AND for a present
+  // body that canonicalizes to `null` (#70). A raw body is stored as its plain
+  // text, indistinguishable from a JSON value of the same canonical shape once
+  // normalized — the collision between raw `foo` and JSON `{"__raw_body__":
+  // "foo"}` (old wrapper), or raw `foo` and JSON `"foo"`. Separately, a JSON
+  // literal `null` body canonicalizes to `body:null`, byte-identical to a
+  // *no-body* request (`body:null`, no encoding tag): without the tag the two
+  // hash the same, the recorder overwrites one cassette with the other, and
+  // replay serves the wrong response. Folding the tag only in these two cases
+  // (raw, or present-but-null) keeps every non-null JSON-body and no-body hash
+  // byte-identical, so already-recorded cassettes still replay.
+  const foldEncoding =
+    req.bodyEncoding === "raw" || (req.bodyEncoding !== undefined && req.body === null);
   const payload = JSON.stringify({
     method: req.method,
     url: req.url,
     body: req.body,
-    ...(req.bodyEncoding === "raw" ? { bodyEncoding: "raw" } : {}),
+    ...(foldEncoding ? { bodyEncoding: req.bodyEncoding } : {}),
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
