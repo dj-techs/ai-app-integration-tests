@@ -342,3 +342,43 @@ describe("null-body statuses (204/205/304) round-trip without crashing (#68)", (
     });
   }
 });
+
+describe("JSON-null body does not collide with a no-body request (#70)", () => {
+  let dir: string;
+  let store: CassetteStore;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "aiit-"));
+    store = new CassetteStore({ dir });
+  });
+
+  it("records both distinctly and replays each its own response", async () => {
+    // A POST with the JSON literal `null` body and a POST with no body both
+    // canonicalize to `body:null`; before #70 they hashed identically, so the
+    // second recording overwrote the first cassette and replay served the wrong
+    // response. They must now write two distinct cassettes and replay correctly.
+    const upstreamNull: typeof fetch = async () => new Response("RESP-FOR-NULL-BODY", { status: 200 });
+    const upstreamNo: typeof fetch = async () => new Response("RESP-FOR-NO-BODY", { status: 200 });
+
+    await createRecorderFetch({ upstream: upstreamNull, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST", body: "null" },
+    );
+    await createRecorderFetch({ upstream: upstreamNo, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST" },
+    );
+
+    const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBe(2);
+
+    const replayer = createReplayerFetch({ store, hosts: HOSTS });
+    const nullResp = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: "null",
+    });
+    const noResp = await replayer("https://api.anthropic.com/v1/messages", { method: "POST" });
+    expect(await nullResp.text()).toBe("RESP-FOR-NULL-BODY");
+    expect(await noResp.text()).toBe("RESP-FOR-NO-BODY");
+  });
+});
