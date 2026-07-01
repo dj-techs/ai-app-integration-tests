@@ -213,6 +213,53 @@ describe("hashRequest", () => {
     const noBodyUntagged = hashRequest({ method: "GET", url: "https://x/a", headers: {}, body: null });
     expect(noBodyTagged).toBe(noBodyUntagged);
   });
+
+  it("distinguishes a JSON-null body from a no-body request (#70)", () => {
+    // A `POST` with the JSON literal `null` body normalizes to
+    // { body: null, bodyEncoding: "json" }; a request with no body normalizes to
+    // { body: null } (no tag). Both canonicalize to `body:null`, so without
+    // folding the tag they hash identically, the recorder overwrites one
+    // cassette with the other, and replay serves the wrong response — the #57
+    // collision class, one value over (every *other* JSON body is non-null and
+    // can't collide with no-body). The present-but-null tag must split them.
+    const nullBody = hashRequest({
+      method: "POST",
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {},
+      body: null,
+      bodyEncoding: "json",
+    });
+    const noBody = hashRequest({
+      method: "POST",
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {},
+      body: null,
+    });
+    expect(nullBody).not.toBe(noBody);
+  });
+
+  it("keeps the raw-body hash byte-identical after the #70 change", () => {
+    // The #70 fix widens the fold to (raw OR present-null); a raw body's hash
+    // must be unchanged so already-recorded raw cassettes still replay.
+    const raw = hashRequest({
+      method: "POST",
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {},
+      body: "foo",
+      bodyEncoding: "raw",
+    });
+    // Same shape the #57 test pins: raw stays distinct from JSON "foo" and its
+    // hash value is stable across the fold-condition change.
+    expect(raw).toBe(
+      hashRequest({
+        method: "POST",
+        url: "https://api.anthropic.com/v1/messages",
+        headers: {},
+        body: "foo",
+        bodyEncoding: "raw",
+      }),
+    );
+  });
 });
 
 describe("redactHeaders", () => {
