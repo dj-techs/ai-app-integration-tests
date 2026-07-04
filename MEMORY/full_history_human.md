@@ -499,3 +499,25 @@ or a new fingerprint shape if one is identified.
 **Open questions / blockers:** none — PR #71 ready for review.
 
 **Next session:** empty-string body (`""`) is currently treated as no-body (a length-0 guard in `normalizeRequest`); whether an empty POST body should be wire-distinct from no body is a separate, more debatable semantic — left unfiled. Continue the loop.
+
+## 2026-07-04 — Issue #72: architecture-doc symbol-resolution lock (TS side of portfolio-ops #55)
+**Duration:** ~35 min · **Branch:** `session/2026-07-04-0326-issue-72` · **PR:** #73
+
+- Added a symbol-resolution invariant to `test/architecture-doc.test.ts` — the last of portfolio-ops #55's three TS repos (siblings: nextjs #76, mcp-server-cookbook #82). The doc names its code surface concretely (`installFromEnv`, `redactHeaders`, `MissingCassetteError`, `createRecorderFetch`, `canonicalize`, …); nothing verified those symbols existed, so a rename would leave the doc stale with CI green. Since this doc is CamelCase-rich, it took the nextjs #76 resolver shape (not mcp #82's tool-name shape): multi-word camel/Pascal inline-code identifiers resolved against a static scan of all top-level declarations in `src/` (exported or internal), with hard-pinned `EXTERNAL_SYMBOLS` (`ReadableStream`, `globalThis`) and `DOC_ILLUSTRATIVE` (`rawBody` — a pseudo-code local in the hashing prose, verified absent from src). Inverse-drift test guards against vacuous green; negative-controlled by renaming a live symbol.
+- All twelve current candidates classify (nine declarations, two external, one illustrative) — no live drift. Suite 213 → 220; tsc + eslint clean.
+
+**Why this work, this session:** third and final issue of the NIGHT loop, completing #55's TS-side propagation. Worked in build-sequence order after nextjs #76 (#11) and mcp-server-cookbook (#10); ai-app-integration-tests is #12.
+
+**Open questions / blockers:** none — ready for review. Noted a pre-existing untracked local file `test/bug_hunt.test.ts` (not on origin/main) with an unused-var lint error; left it alone (not mine), scoped the commit to only the test file so it's absent from the PR/CI.
+
+**Next session:** portfolio-ops #55 can be closed once nextjs #77 / mcp #83 / ai-app #73 merge (Python side already done). Portfolio remains saturated; remaining open issues are JT-blocked decision-revisits and operator-visual demo captures.
+
+## 2026-07-04 — Issue #74: example-app tool-name resolution (folded into PR #73)
+**Duration:** ~20 min · **Branch:** `session/2026-07-04-0326-issue-72` · **PR:** #73 (also closes #72)
+
+- The #72 CamelCase resolver excludes snake_case, so the doc's example-app tool claims (`/tools` — "Two tools (`get_weather`, `calculate`)") were still unlocked. Added an example-app tool-name invariant using the mcp-server-cookbook #82 approach: tool names from the doc's `N tools (…)` syntax resolved against `name: "…"` registrations scanned in `example-app/app/api/` (scan root hard-pinned). Both tools resolve; inverse-drift and a manual negative control (renamed `get_weather`) confirm the lock bites. Suite → 224 green; tsc + eslint clean.
+- **Folded into PR #73 rather than a separate PR** because both touch `test/architecture-doc.test.ts` and #73 isn't merged yet — two concurrent same-file PRs against main would guarantee the documented sibling-append conflict. #73 was unreviewed, so broadening it to close both #72 and #74 is the clean one-file/one-theme outcome.
+
+**Why this work, this session:** fourth iteration; closes the snake_case tool gap the #72 resolver left, keeping the whole architecture doc symbol-accurate.
+
+**Open questions / blockers:** none. Deferred: error-kind (`validation`/`upstream`/`shape`) resolution — a union-type shape, separate concern.
