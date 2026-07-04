@@ -378,3 +378,93 @@ describe("docs/architecture.md names only symbols that exist (#72 / portfolio-op
     expect([...SOURCE_DIRS]).toEqual(["src"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Example-app tool-name resolution (portfolio-ops #55 follow-on — #74).
+//
+// The CamelCase resolver above deliberately excludes snake_case tokens, so the
+// doc's *example-app tool claims* were still unlocked. The "Example app under
+// test" section states `/tools` ships "Two tools (`get_weather`, `calculate`)"
+// — snake_case names registered as `name: "..."` in the example-app route
+// handlers. A handler renaming `get_weather` -> `weather` would leave the
+// doc's claim stale with CI green: the same drift class #55 targets, on the
+// peer subproject's tool surface. This is the mcp-server-cookbook #82
+// tool-name approach applied here (snake_case tool-name resolution, not the
+// CamelCase identifier resolver), scoped to the example-app's API routes.
+
+const EXAMPLE_API_DIR = "example-app/app/api";
+
+/** Extract the tool names the doc claims the example app exposes, from its own
+ *  `N tools (`a`, `b`)` declaration syntax. Anchoring on that frame keeps the
+ *  candidate set precise — it doesn't sweep in the many other backticked
+ *  snake_case tokens the doc names (`content_block_delta`, `message_stop`,
+ *  `validation`, `upstream`, `shape`), which are SSE event kinds and
+ *  error-kind union members, not tools. */
+function docToolClaims(md: string): string[] {
+  const claims = new Set<string>();
+  for (const list of md.matchAll(/\btools?\s*\(([^)]*)\)/g)) {
+    for (const t of list[1].matchAll(/`([a-z][a-z0-9_]*)`/g)) claims.add(t[1]);
+  }
+  return [...claims].sort();
+}
+
+/** Every tool name registered as `name: "..."` in the example-app API route
+ *  handlers — the ground truth a doc tool-claim must resolve against. Scanned
+ *  from `example-app/app/api/**​/*.ts`, test files excluded. */
+function registeredExampleTools(): Set<string> {
+  const names = new Set<string>();
+  const walk = (dir: string): void => {
+    const abs = resolve(ROOT, dir);
+    if (!existsSync(abs)) return;
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const rel = join(dir, entry.name);
+      if (entry.isDirectory()) walk(rel);
+      else if (entry.name.endsWith(".ts") && !/\.test\.ts$/.test(entry.name)) {
+        const text = readFileSync(resolve(ROOT, rel), "utf8");
+        for (const m of text.matchAll(/\bname\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1]);
+      }
+    }
+  };
+  walk(EXAMPLE_API_DIR);
+  return names;
+}
+
+/** Shared resolver used by both the live and inverse tests. */
+function unresolvedTools(md: string, registered: Set<string>): string[] {
+  return docToolClaims(md).filter((t) => !registered.has(t));
+}
+
+describe("docs/architecture.md example-app tool claims resolve (#74 / portfolio-ops #55)", () => {
+  const md = readFileSync(ARCH_PATH, "utf8");
+  const registered = registeredExampleTools();
+
+  it("discovers the example-app's registered tools as ground truth", () => {
+    // Floor on the scan: get_weather / calculate are registered in
+    // example-app/app/api/tools/route.ts. If the walk regresses, the
+    // resolution below would false-flag — catch it here.
+    expect(registered.has("get_weather")).toBe(true);
+    expect(registered.has("calculate")).toBe(true);
+  });
+
+  it("every tool the doc claims the example app exposes is registered", () => {
+    const unresolved = unresolvedTools(md, registered);
+    expect(
+      unresolved,
+      `docs/architecture.md claims example-app tools that no route handler registers: ` +
+        `${JSON.stringify(unresolved)}. Every tool named in an "N tools (...)" list must ` +
+        `appear as name: "..." in example-app/app/api/. Fix the doc or the registration.`,
+    ).toEqual([]);
+  });
+
+  it("flags a drifted tool claim while a real one resolves (inverse safety net)", () => {
+    const claims = docToolClaims("two tools (`get_weather`, `calculaate`)");
+    const reg = new Set(["get_weather", "calculate"]);
+    expect(unresolvedTools("two tools (`get_weather`, `calculaate`)", reg)).toEqual(["calculaate"]);
+    expect(claims).toContain("get_weather");
+  });
+
+  it("EXAMPLE_API_DIR is the exact pinned scan root", () => {
+    expect(EXAMPLE_API_DIR).toBe("example-app/app/api");
+  });
+});
