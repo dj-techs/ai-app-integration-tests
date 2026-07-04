@@ -800,3 +800,24 @@ context_for_next_session:
 decisions_made: []
 followups: []
 ---
+
+---
+session: 2026-07-04T03:26Z
+issue: 74
+focus: example_app_tool_name_resolution_lock_folded_into_72_pr
+phase: night_session_phase_b_iteration_4
+duration_min: 20
+delta:
+  files_changed: 1 # test/architecture-doc.test.ts (same file/branch as 72)
+  tests_added: 4   # ground-truth-floor + resolution + inverse-drift + hard-pin
+context_for_next_session:
+  - fourth_iteration_folded_into_72_branch_pr_73_rather_than_a_separate_pr_because_both_modify_test_architecture_doc_test_ts_and_72_pr_73_is_not_merged_yet_two_concurrent_same_file_prs_against_main_would_guarantee_the_documented_sibling_append_conflict
+  - decision_fold_not_stack_pr_73_unreviewed_so_broadening_it_costs_nothing_coherent_one_file_one_theme_pr_73_now_closes_72_and_74
+  - the_72_camelcase_resolver_excludes_snake_case_so_example_app_tool_claims_get_weather_calculate_were_unlocked_this_closes_that_gap_using_mcp_82_tool_name_approach
+  - doctoolclaims_extracts_from_docs_n_tools_paren_syntax_registeredexampletools_scans_name_colon_string_in_example_app_app_api_star_star_ts_test_files_excluded_example_api_dir_scan_root_hard_pinned
+  - get_weather_and_calculate_both_resolve_no_live_drift_negative_control_renamed_get_weather_to_get_wether_in_doc_suite_failed_legibly
+  - full_vitest_224_green_23_in_arch_doc_file_11_new_across_72_plus_74_tsc_noemit_clean_eslint_my_file_clean
+  - deferred_error_kind_claims_validation_upstream_shape_are_a_union_type_different_resolution_shape_not_filed_unless_worth_it
+decisions_made: []
+followups: []
+---
