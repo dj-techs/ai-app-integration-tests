@@ -29,8 +29,8 @@
 //      deliverable must bump the array AND add a doc reference.
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 
 const ROOT = resolve(__dirname, "..");
 const ARCH_PATH = resolve(ROOT, "docs/architecture.md");
@@ -205,5 +205,266 @@ describe("docs/architecture.md is current with shipped scope (#18)", () => {
     // deliverable requires bumping this AND adding a doc reference;
     // this hard-pin makes the former unmissable.
     expect([...KNOWN_SHIPPED_ISSUES]).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Symbol-resolution lock (portfolio-ops #55, TS side — #72).
+//
+// The axes above lock path tokens, banned phrases, subpath presence, active
+// decisions, and shipped issues — but nothing checks that the *symbols* the
+// doc names actually exist. The doc makes concrete claims about the code
+// surface: `installFromEnv`, `redactHeaders`, `assertNoLeakedSecrets`,
+// `MissingCassetteError`, `createRecorderFetch` / `createReplayerFetch`,
+// `validateHosts`, `canonicalize`. A rename (say `redactHeaders` ->
+// `scrubHeaders`) would leave the doc stale with CI green — the drift class
+// portfolio-ops #55 catalogued portfolio-wide (e.g. llm-cost-optimizer's
+// nonexistent `BatchAPIBackend`).
+//
+// This doc is CamelCase-identifier-rich, so it takes the same resolver shape
+// as the nextjs-streaming-ai-patterns #76 sibling (not mcp-server-cookbook
+// #82's tool-name approach): multi-word camel/Pascal inline-code identifiers,
+// fenced blocks stripped, resolved against a static scan of every top-level
+// declaration in `src/` (exported OR internal — the Python siblings resolve
+// against the module's full attribute surface via `hasattr`, not just
+// exports). Single lowercase words, SCREAMING_CASE env/const
+// (`ANTHROPIC_TEST_MODE`), and snake_case SSE/tool tokens
+// (`content_block_delta`, `get_weather`) are excluded as prose/wire noise.
+// Two hard-pinned exception sets carry the non-declaration identifiers.
+
+const SOURCE_DIRS = ["src"] as const;
+const SOURCE_EXTS = [".ts", ".tsx"] as const;
+
+// Framework / web / runtime globals the doc names in backticks that are NOT
+// repo declarations. Multi-word only (a single-word `Response` / `Request`
+// never enters the candidate set). Hard-pinned below.
+const EXTERNAL_SYMBOLS: ReadonlyArray<string> = [
+  "ReadableStream", // web streams API (replayer rebuilds SSE Response bodies)
+  "globalThis", // JS global (the recorder/replayer wrap `globalThis.fetch`)
+] as const;
+
+// Illustrative pseudo-code identifiers the doc uses to *describe* behavior but
+// that name no real declaration. `rawBody` appears only in the hashing prose
+// (`canonicalize(parse(rawBody))`) as a stand-in for "the request body string"
+// — verified absent from src/. Kept as an explicit, verified pin rather than
+// loosening the candidate rule (which would also stop catching real drift).
+const DOC_ILLUSTRATIVE: ReadonlyArray<string> = ["rawBody"] as const;
+
+/** Strip fenced code blocks (``` ... ```), including the mermaid diagram and
+ *  the bash/record snippets, so the backtick pairing for inline-code
+ *  extraction can't desync on the triple fences. */
+function stripFences(md: string): string {
+  return md.replace(/```[\s\S]*?```/g, "");
+}
+
+/** True for a multi-word camelCase or PascalCase identifier — one with an
+ *  internal lower->upper boundary (`installFromEnv`) or a Pascal-with-
+ *  second-cap shape (`MissingCassetteError`). Single-word tokens return false. */
+function isMultiWordIdentifier(tok: string): boolean {
+  return /[a-z][A-Z]/.test(tok) || /[A-Z][a-z].*[A-Z]/.test(tok);
+}
+
+/** Multi-word camel/Pascal identifier candidates from the doc: fenced blocks
+ *  stripped, then every inline-code span split into identifier tokens (dotted
+ *  member refs split on `.`). Sorted unique. */
+function candidateSymbols(md: string): string[] {
+  const prose = stripFences(md);
+  const out = new Set<string>();
+  for (const m of prose.matchAll(/`([^`\n]+)`/g)) {
+    for (const piece of m[1].split(/[^A-Za-z0-9_$]+/)) {
+      for (const tok of piece.split(".")) {
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tok) && isMultiWordIdentifier(tok)) {
+          out.add(tok);
+        }
+      }
+    }
+  }
+  return [...out].sort();
+}
+
+/** Recursively collect `*.ts` / `*.tsx` files under a source dir. */
+function sourceFiles(dir: string): string[] {
+  const abs = resolve(ROOT, dir);
+  if (!existsSync(abs)) return [];
+  const files: string[] = [];
+  for (const entry of readdirSync(abs, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = join(abs, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(join(dir, entry.name)));
+    else if (SOURCE_EXTS.some((e) => entry.name.endsWith(e))) files.push(full);
+  }
+  return files;
+}
+
+/** Every top-level declaration name across the source dirs — exported or
+ *  internal. The TS analogue of the Python resolver's module attribute
+ *  surface. */
+function repoDeclaredSymbols(): Set<string> {
+  const decl =
+    /(?:^|\n)[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:async[ \t]+)?(?:function\*?|const|let|var|class|type|interface|enum)[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  const names = new Set<string>();
+  for (const dir of SOURCE_DIRS) {
+    for (const file of sourceFiles(dir)) {
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(decl)) names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+/** Shared resolution path used by BOTH the live doc test and the inverse
+ *  drift test, so the inverse test exercises the real resolver (not a
+ *  re-implementation) and a resolver that resolves everything can't go
+ *  vacuously green. Returns the candidates that resolve to nothing. */
+function unresolvedSymbols(md: string, repoSymbols: Set<string>): string[] {
+  const allowed = new Set<string>([...EXTERNAL_SYMBOLS, ...DOC_ILLUSTRATIVE]);
+  return candidateSymbols(md).filter(
+    (sym) => !repoSymbols.has(sym) && !allowed.has(sym),
+  );
+}
+
+describe("docs/architecture.md names only symbols that exist (#72 / portfolio-ops #55)", () => {
+  const md = readFileSync(ARCH_PATH, "utf8");
+  const repoSymbols = repoDeclaredSymbols();
+
+  it("extracts a non-empty candidate set (guards regex/extraction breakage)", () => {
+    expect(candidateSymbols(md).length).toBeGreaterThan(0);
+  });
+
+  it("discovers the repo's real declarations as ground truth", () => {
+    // Sanity floor on the source scan: these are named in the doc's prose and
+    // known to exist. If the scan regresses to empty/tiny, the resolution test
+    // would false-flag everything — catch it here with a legible message.
+    for (const known of ["installFromEnv", "redactHeaders", "MissingCassetteError", "canonicalize"]) {
+      expect(repoSymbols.has(known), `expected repo declaration '${known}' in the source scan`).toBe(true);
+    }
+  });
+
+  it("every multi-word symbol the doc names resolves to a declaration or a pinned exception", () => {
+    const unresolved = unresolvedSymbols(md, repoSymbols);
+    expect(
+      unresolved,
+      `docs/architecture.md names these multi-word identifiers that resolve to no ` +
+        `top-level declaration in src/, and are not in EXTERNAL_SYMBOLS or ` +
+        `DOC_ILLUSTRATIVE: ${JSON.stringify(unresolved)}. Either fix the doc, or ` +
+        `(if the symbol is a genuine runtime global / illustrative pseudo-code ` +
+        `token) add it to the matching pinned set.`,
+    ).toEqual([]);
+  });
+
+  it("flags an injected drifted symbol while a real one in the same text resolves (inverse safety net)", () => {
+    // Prove the resolver rejects a nonexistent symbol — otherwise the green
+    // above could be vacuous. `redactHeadersXYZ` is not a declaration, not
+    // external, not illustrative; `redactHeaders` is a real export. Same code
+    // path as the live test.
+    const injected = "the real `redactHeaders` sits next to a drifted `redactHeadersXYZ`";
+    const unresolved = unresolvedSymbols(injected, repoSymbols);
+    expect(unresolved).toContain("redactHeadersXYZ");
+    expect(unresolved).not.toContain("redactHeaders");
+  });
+
+  it("EXTERNAL_SYMBOLS is the exact pinned set", () => {
+    expect([...EXTERNAL_SYMBOLS]).toEqual(["ReadableStream", "globalThis"]);
+  });
+
+  it("DOC_ILLUSTRATIVE is the exact pinned set", () => {
+    expect([...DOC_ILLUSTRATIVE]).toEqual(["rawBody"]);
+  });
+
+  it("SOURCE_DIRS is the exact pinned set", () => {
+    // The ground-truth scan root. example-app/ is a peer subproject with its
+    // own tree; widening to it (to resolve an example-app symbol the doc might
+    // name) should be an intentional edit, not silent drift.
+    expect([...SOURCE_DIRS]).toEqual(["src"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Example-app tool-name resolution (portfolio-ops #55 follow-on — #74).
+//
+// The CamelCase resolver above deliberately excludes snake_case tokens, so the
+// doc's *example-app tool claims* were still unlocked. The "Example app under
+// test" section states `/tools` ships "Two tools (`get_weather`, `calculate`)"
+// — snake_case names registered as `name: "..."` in the example-app route
+// handlers. A handler renaming `get_weather` -> `weather` would leave the
+// doc's claim stale with CI green: the same drift class #55 targets, on the
+// peer subproject's tool surface. This is the mcp-server-cookbook #82
+// tool-name approach applied here (snake_case tool-name resolution, not the
+// CamelCase identifier resolver), scoped to the example-app's API routes.
+
+const EXAMPLE_API_DIR = "example-app/app/api";
+
+/** Extract the tool names the doc claims the example app exposes, from its own
+ *  `N tools (`a`, `b`)` declaration syntax. Anchoring on that frame keeps the
+ *  candidate set precise — it doesn't sweep in the many other backticked
+ *  snake_case tokens the doc names (`content_block_delta`, `message_stop`,
+ *  `validation`, `upstream`, `shape`), which are SSE event kinds and
+ *  error-kind union members, not tools. */
+function docToolClaims(md: string): string[] {
+  const claims = new Set<string>();
+  for (const list of md.matchAll(/\btools?\s*\(([^)]*)\)/g)) {
+    for (const t of list[1].matchAll(/`([a-z][a-z0-9_]*)`/g)) claims.add(t[1]);
+  }
+  return [...claims].sort();
+}
+
+/** Every tool name registered as `name: "..."` in the example-app API route
+ *  handlers — the ground truth a doc tool-claim must resolve against. Scanned
+ *  from `example-app/app/api/**​/*.ts`, test files excluded. */
+function registeredExampleTools(): Set<string> {
+  const names = new Set<string>();
+  const walk = (dir: string): void => {
+    const abs = resolve(ROOT, dir);
+    if (!existsSync(abs)) return;
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const rel = join(dir, entry.name);
+      if (entry.isDirectory()) walk(rel);
+      else if (entry.name.endsWith(".ts") && !/\.test\.ts$/.test(entry.name)) {
+        const text = readFileSync(resolve(ROOT, rel), "utf8");
+        for (const m of text.matchAll(/\bname\s*:\s*"([a-z][a-z0-9_]*)"/g)) names.add(m[1]);
+      }
+    }
+  };
+  walk(EXAMPLE_API_DIR);
+  return names;
+}
+
+/** Shared resolver used by both the live and inverse tests. */
+function unresolvedTools(md: string, registered: Set<string>): string[] {
+  return docToolClaims(md).filter((t) => !registered.has(t));
+}
+
+describe("docs/architecture.md example-app tool claims resolve (#74 / portfolio-ops #55)", () => {
+  const md = readFileSync(ARCH_PATH, "utf8");
+  const registered = registeredExampleTools();
+
+  it("discovers the example-app's registered tools as ground truth", () => {
+    // Floor on the scan: get_weather / calculate are registered in
+    // example-app/app/api/tools/route.ts. If the walk regresses, the
+    // resolution below would false-flag — catch it here.
+    expect(registered.has("get_weather")).toBe(true);
+    expect(registered.has("calculate")).toBe(true);
+  });
+
+  it("every tool the doc claims the example app exposes is registered", () => {
+    const unresolved = unresolvedTools(md, registered);
+    expect(
+      unresolved,
+      `docs/architecture.md claims example-app tools that no route handler registers: ` +
+        `${JSON.stringify(unresolved)}. Every tool named in an "N tools (...)" list must ` +
+        `appear as name: "..." in example-app/app/api/. Fix the doc or the registration.`,
+    ).toEqual([]);
+  });
+
+  it("flags a drifted tool claim while a real one resolves (inverse safety net)", () => {
+    const claims = docToolClaims("two tools (`get_weather`, `calculaate`)");
+    const reg = new Set(["get_weather", "calculate"]);
+    expect(unresolvedTools("two tools (`get_weather`, `calculaate`)", reg)).toEqual(["calculaate"]);
+    expect(claims).toContain("get_weather");
+  });
+
+  it("EXAMPLE_API_DIR is the exact pinned scan root", () => {
+    expect(EXAMPLE_API_DIR).toBe("example-app/app/api");
   });
 });
