@@ -29,8 +29,8 @@
 //      deliverable must bump the array AND add a doc reference.
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 
 const ROOT = resolve(__dirname, "..");
 const ARCH_PATH = resolve(ROOT, "docs/architecture.md");
@@ -205,5 +205,176 @@ describe("docs/architecture.md is current with shipped scope (#18)", () => {
     // deliverable requires bumping this AND adding a doc reference;
     // this hard-pin makes the former unmissable.
     expect([...KNOWN_SHIPPED_ISSUES]).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Symbol-resolution lock (portfolio-ops #55, TS side — #72).
+//
+// The axes above lock path tokens, banned phrases, subpath presence, active
+// decisions, and shipped issues — but nothing checks that the *symbols* the
+// doc names actually exist. The doc makes concrete claims about the code
+// surface: `installFromEnv`, `redactHeaders`, `assertNoLeakedSecrets`,
+// `MissingCassetteError`, `createRecorderFetch` / `createReplayerFetch`,
+// `validateHosts`, `canonicalize`. A rename (say `redactHeaders` ->
+// `scrubHeaders`) would leave the doc stale with CI green — the drift class
+// portfolio-ops #55 catalogued portfolio-wide (e.g. llm-cost-optimizer's
+// nonexistent `BatchAPIBackend`).
+//
+// This doc is CamelCase-identifier-rich, so it takes the same resolver shape
+// as the nextjs-streaming-ai-patterns #76 sibling (not mcp-server-cookbook
+// #82's tool-name approach): multi-word camel/Pascal inline-code identifiers,
+// fenced blocks stripped, resolved against a static scan of every top-level
+// declaration in `src/` (exported OR internal — the Python siblings resolve
+// against the module's full attribute surface via `hasattr`, not just
+// exports). Single lowercase words, SCREAMING_CASE env/const
+// (`ANTHROPIC_TEST_MODE`), and snake_case SSE/tool tokens
+// (`content_block_delta`, `get_weather`) are excluded as prose/wire noise.
+// Two hard-pinned exception sets carry the non-declaration identifiers.
+
+const SOURCE_DIRS = ["src"] as const;
+const SOURCE_EXTS = [".ts", ".tsx"] as const;
+
+// Framework / web / runtime globals the doc names in backticks that are NOT
+// repo declarations. Multi-word only (a single-word `Response` / `Request`
+// never enters the candidate set). Hard-pinned below.
+const EXTERNAL_SYMBOLS: ReadonlyArray<string> = [
+  "ReadableStream", // web streams API (replayer rebuilds SSE Response bodies)
+  "globalThis", // JS global (the recorder/replayer wrap `globalThis.fetch`)
+] as const;
+
+// Illustrative pseudo-code identifiers the doc uses to *describe* behavior but
+// that name no real declaration. `rawBody` appears only in the hashing prose
+// (`canonicalize(parse(rawBody))`) as a stand-in for "the request body string"
+// — verified absent from src/. Kept as an explicit, verified pin rather than
+// loosening the candidate rule (which would also stop catching real drift).
+const DOC_ILLUSTRATIVE: ReadonlyArray<string> = ["rawBody"] as const;
+
+/** Strip fenced code blocks (``` ... ```), including the mermaid diagram and
+ *  the bash/record snippets, so the backtick pairing for inline-code
+ *  extraction can't desync on the triple fences. */
+function stripFences(md: string): string {
+  return md.replace(/```[\s\S]*?```/g, "");
+}
+
+/** True for a multi-word camelCase or PascalCase identifier — one with an
+ *  internal lower->upper boundary (`installFromEnv`) or a Pascal-with-
+ *  second-cap shape (`MissingCassetteError`). Single-word tokens return false. */
+function isMultiWordIdentifier(tok: string): boolean {
+  return /[a-z][A-Z]/.test(tok) || /[A-Z][a-z].*[A-Z]/.test(tok);
+}
+
+/** Multi-word camel/Pascal identifier candidates from the doc: fenced blocks
+ *  stripped, then every inline-code span split into identifier tokens (dotted
+ *  member refs split on `.`). Sorted unique. */
+function candidateSymbols(md: string): string[] {
+  const prose = stripFences(md);
+  const out = new Set<string>();
+  for (const m of prose.matchAll(/`([^`\n]+)`/g)) {
+    for (const piece of m[1].split(/[^A-Za-z0-9_$]+/)) {
+      for (const tok of piece.split(".")) {
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tok) && isMultiWordIdentifier(tok)) {
+          out.add(tok);
+        }
+      }
+    }
+  }
+  return [...out].sort();
+}
+
+/** Recursively collect `*.ts` / `*.tsx` files under a source dir. */
+function sourceFiles(dir: string): string[] {
+  const abs = resolve(ROOT, dir);
+  if (!existsSync(abs)) return [];
+  const files: string[] = [];
+  for (const entry of readdirSync(abs, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = join(abs, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(join(dir, entry.name)));
+    else if (SOURCE_EXTS.some((e) => entry.name.endsWith(e))) files.push(full);
+  }
+  return files;
+}
+
+/** Every top-level declaration name across the source dirs — exported or
+ *  internal. The TS analogue of the Python resolver's module attribute
+ *  surface. */
+function repoDeclaredSymbols(): Set<string> {
+  const decl =
+    /(?:^|\n)[ \t]*(?:export[ \t]+)?(?:default[ \t]+)?(?:async[ \t]+)?(?:function\*?|const|let|var|class|type|interface|enum)[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  const names = new Set<string>();
+  for (const dir of SOURCE_DIRS) {
+    for (const file of sourceFiles(dir)) {
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(decl)) names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+/** Shared resolution path used by BOTH the live doc test and the inverse
+ *  drift test, so the inverse test exercises the real resolver (not a
+ *  re-implementation) and a resolver that resolves everything can't go
+ *  vacuously green. Returns the candidates that resolve to nothing. */
+function unresolvedSymbols(md: string, repoSymbols: Set<string>): string[] {
+  const allowed = new Set<string>([...EXTERNAL_SYMBOLS, ...DOC_ILLUSTRATIVE]);
+  return candidateSymbols(md).filter(
+    (sym) => !repoSymbols.has(sym) && !allowed.has(sym),
+  );
+}
+
+describe("docs/architecture.md names only symbols that exist (#72 / portfolio-ops #55)", () => {
+  const md = readFileSync(ARCH_PATH, "utf8");
+  const repoSymbols = repoDeclaredSymbols();
+
+  it("extracts a non-empty candidate set (guards regex/extraction breakage)", () => {
+    expect(candidateSymbols(md).length).toBeGreaterThan(0);
+  });
+
+  it("discovers the repo's real declarations as ground truth", () => {
+    // Sanity floor on the source scan: these are named in the doc's prose and
+    // known to exist. If the scan regresses to empty/tiny, the resolution test
+    // would false-flag everything — catch it here with a legible message.
+    for (const known of ["installFromEnv", "redactHeaders", "MissingCassetteError", "canonicalize"]) {
+      expect(repoSymbols.has(known), `expected repo declaration '${known}' in the source scan`).toBe(true);
+    }
+  });
+
+  it("every multi-word symbol the doc names resolves to a declaration or a pinned exception", () => {
+    const unresolved = unresolvedSymbols(md, repoSymbols);
+    expect(
+      unresolved,
+      `docs/architecture.md names these multi-word identifiers that resolve to no ` +
+        `top-level declaration in src/, and are not in EXTERNAL_SYMBOLS or ` +
+        `DOC_ILLUSTRATIVE: ${JSON.stringify(unresolved)}. Either fix the doc, or ` +
+        `(if the symbol is a genuine runtime global / illustrative pseudo-code ` +
+        `token) add it to the matching pinned set.`,
+    ).toEqual([]);
+  });
+
+  it("flags an injected drifted symbol while a real one in the same text resolves (inverse safety net)", () => {
+    // Prove the resolver rejects a nonexistent symbol — otherwise the green
+    // above could be vacuous. `redactHeadersXYZ` is not a declaration, not
+    // external, not illustrative; `redactHeaders` is a real export. Same code
+    // path as the live test.
+    const injected = "the real `redactHeaders` sits next to a drifted `redactHeadersXYZ`";
+    const unresolved = unresolvedSymbols(injected, repoSymbols);
+    expect(unresolved).toContain("redactHeadersXYZ");
+    expect(unresolved).not.toContain("redactHeaders");
+  });
+
+  it("EXTERNAL_SYMBOLS is the exact pinned set", () => {
+    expect([...EXTERNAL_SYMBOLS]).toEqual(["ReadableStream", "globalThis"]);
+  });
+
+  it("DOC_ILLUSTRATIVE is the exact pinned set", () => {
+    expect([...DOC_ILLUSTRATIVE]).toEqual(["rawBody"]);
+  });
+
+  it("SOURCE_DIRS is the exact pinned set", () => {
+    // The ground-truth scan root. example-app/ is a peer subproject with its
+    // own tree; widening to it (to resolve an example-app symbol the doc might
+    // name) should be an intentional edit, not silent drift.
+    expect([...SOURCE_DIRS]).toEqual(["src"]);
   });
 });
