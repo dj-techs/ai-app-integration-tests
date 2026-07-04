@@ -511,3 +511,13 @@ or a new fingerprint shape if one is identified.
 **Open questions / blockers:** none — ready for review. Noted a pre-existing untracked local file `test/bug_hunt.test.ts` (not on origin/main) with an unused-var lint error; left it alone (not mine), scoped the commit to only the test file so it's absent from the PR/CI.
 
 **Next session:** portfolio-ops #55 can be closed once nextjs #77 / mcp #83 / ai-app #73 merge (Python side already done). Portfolio remains saturated; remaining open issues are JT-blocked decision-revisits and operator-visual demo captures.
+
+## 2026-07-04 — Issue #74: example-app tool-name resolution (folded into PR #73)
+**Duration:** ~20 min · **Branch:** `session/2026-07-04-0326-issue-72` · **PR:** #73 (also closes #72)
+
+- The #72 CamelCase resolver excludes snake_case, so the doc's example-app tool claims (`/tools` — "Two tools (`get_weather`, `calculate`)") were still unlocked. Added an example-app tool-name invariant using the mcp-server-cookbook #82 approach: tool names from the doc's `N tools (…)` syntax resolved against `name: "…"` registrations scanned in `example-app/app/api/` (scan root hard-pinned). Both tools resolve; inverse-drift and a manual negative control (renamed `get_weather`) confirm the lock bites. Suite → 224 green; tsc + eslint clean.
+- **Folded into PR #73 rather than a separate PR** because both touch `test/architecture-doc.test.ts` and #73 isn't merged yet — two concurrent same-file PRs against main would guarantee the documented sibling-append conflict. #73 was unreviewed, so broadening it to close both #72 and #74 is the clean one-file/one-theme outcome.
+
+**Why this work, this session:** fourth iteration; closes the snake_case tool gap the #72 resolver left, keeping the whole architecture doc symbol-accurate.
+
+**Open questions / blockers:** none. Deferred: error-kind (`validation`/`upstream`/`shape`) resolution — a union-type shape, separate concern.
