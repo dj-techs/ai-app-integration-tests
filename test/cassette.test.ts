@@ -25,6 +25,40 @@ describe("canonicalize", () => {
     expect(canonicalize("x")).toBe("x");
     expect(canonicalize(null)).toBe(null);
   });
+
+  it("preserves a __proto__ body key instead of dropping it (#75)", () => {
+    // JSON.parse produces __proto__ as a real own-enumerable key. On a plain {}
+    // accumulator the assignment hit the prototype setter and the key vanished,
+    // collapsing two different bodies to the same canonical bytes.
+    const withProto = JSON.parse('{"__proto__":{"role":"admin"},"model":"x"}');
+    const withoutProto = JSON.parse('{"model":"x"}');
+    expect(JSON.stringify(canonicalize(withProto))).not.toBe(
+      JSON.stringify(canonicalize(withoutProto)),
+    );
+    // The field itself survives into the canonical form.
+    expect(JSON.stringify(canonicalize(withProto))).toBe('{"__proto__":{"role":"admin"},"model":"x"}');
+  });
+
+  it("preserves a nested __proto__ body key (#75)", () => {
+    const input = JSON.parse('{"outer":{"__proto__":{"x":1},"k":2}}');
+    expect(JSON.stringify(canonicalize(input))).toBe('{"outer":{"__proto__":{"x":1},"k":2}}');
+  });
+
+  it("two bodies differing only by a __proto__ key hash differently (#75)", () => {
+    const withProto = hashRequest({
+      method: "POST",
+      url: "https://x/v1/messages",
+      headers: {},
+      body: canonicalize(JSON.parse('{"__proto__":{"role":"admin"},"model":"x"}')),
+    });
+    const withoutProto = hashRequest({
+      method: "POST",
+      url: "https://x/v1/messages",
+      headers: {},
+      body: canonicalize(JSON.parse('{"model":"x"}')),
+    });
+    expect(withProto).not.toBe(withoutProto);
+  });
 });
 
 describe("normalizeUrl", () => {

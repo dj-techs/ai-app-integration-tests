@@ -521,3 +521,18 @@ or a new fingerprint shape if one is identified.
 **Why this work, this session:** fourth iteration; closes the snake_case tool gap the #72 resolver left, keeping the whole architecture doc symbol-accurate.
 
 **Open questions / blockers:** none. Deferred: error-kind (`validation`/`upstream`/`shape`) resolution — a union-type shape, separate concern.
+
+---
+
+## 2026-07-09 — Issue #75: canonicalize drops a __proto__ body key (wrong-cassette replay)
+**Duration:** ~25 min · **Branch:** `session/2026-07-09-0402-issue-75` · **PR:** #76
+
+- `canonicalize` rebuilt each object into a plain `{}` and assigned `out[k] = ...`. A body key literally named `__proto__` (a real own key after `JSON.parse`) hit the prototype setter, mutated `out`'s prototype, and was omitted by `JSON.stringify`. Two bodies (one with `__proto__`, one without) then canonicalized to identical bytes and hash-collided — the recorder overwrote one cassette with the other and replay served the wrong response.
+- Fix: build the accumulator with `Object.create(null)` so `__proto__` is stored as an own property and folds into the hash. Every non-`__proto__` body is byte-identical (Object.keys/.sort()/JSON.stringify are unchanged on null-proto objects); the cassette round-trip stays safe. Regression tests for top-level + nested `__proto__` and distinct `hashRequest`.
+- Reproduced firsthand on clean main; full suite 225 passed, eslint + tsc clean. Found by a parallel dogfood agent (request-hashing lens), verified firsthand.
+
+**Why this work, this session:** Static queue globally exhausted; ai-app-integration-tests hadn't been worked in ~4 days. Upholds the cassette-hash invariant (#57/#70 lineage) — two different requests must not hash the same.
+
+**Open questions / blockers:** none.
+
+**Next session:** prototype-pollution-adjacent key handling — check other repos' canonicalizers / dedup maps / key-by-key object builders for the same dropped-`__proto__`/`constructor` special-key class.

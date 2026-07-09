@@ -83,7 +83,17 @@ export function canonicalize(value: unknown): unknown {
     return value.map(canonicalize);
   }
   if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
+    // Null-prototype accumulator: a body key literally named `__proto__` is a
+    // real own-enumerable key after `JSON.parse`, but assigning `out["__proto__"]`
+    // on a plain `{}` hits the prototype *setter* — it mutates `out`'s prototype
+    // instead of creating an own property, and `JSON.stringify` then omits it. The
+    // field would vanish, so a body with `__proto__` canonicalizes identically to
+    // the same body without it: two different requests hash-collide and replay
+    // serves the wrong cassette (#75; same invariant as #57/#70). `Object.create(null)`
+    // has no `__proto__` accessor, so the assignment creates an own property and
+    // the field is hashed. `Object.keys`/`.sort()`/`JSON.stringify` are unchanged
+    // on null-prototype objects, so every other body is byte-identical.
+    const out: Record<string, unknown> = Object.create(null);
     for (const k of Object.keys(value as Record<string, unknown>).sort()) {
       out[k] = canonicalize((value as Record<string, unknown>)[k]);
     }
