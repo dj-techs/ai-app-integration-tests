@@ -118,7 +118,22 @@ async function readBodyAsText(
     if (typeof body === "string") return body;
     if (body instanceof Uint8Array) return new TextDecoder().decode(body);
     if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
-    // Skip ReadableStream / FormData / Blob — too varied to canonicalize.
+    if (body instanceof URLSearchParams) {
+      // A URLSearchParams body is a standard BodyInit that fetch serializes onto
+      // the wire as `application/x-www-form-urlencoded` — `toString()` is exactly
+      // those bytes. Dropping it to `null` (below) left every form POST looking
+      // like a no-body request, so two distinct form bodies (`foo=1` vs `bar=2`)
+      // hash-collided and one replayed the other's cassette, and a form POST
+      // collided with a no-body POST. Return the encoded text so normalizeRequest
+      // tags it `bodyEncoding:"raw"` and folds it into the hash — the same
+      // collision class as #84 (empty-string) / #70 (JSON-null) / #57 (raw/JSON),
+      // one body-type over.
+      return body.toString();
+    }
+    // Skip ReadableStream / FormData / Blob — genuinely un-canonicalizable here (a
+    // stream is single-read; FormData/Blob boundaries are nondeterministic). They
+    // still drop to null; a request whose only body is one of those is out of
+    // scope for hashing (documented limitation, not the URLSearchParams gap above).
     return null;
   }
   if (typeof input === "object" && "clone" in input && typeof input.clone === "function") {
