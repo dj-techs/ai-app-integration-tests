@@ -40,17 +40,31 @@ async function normalizeRequest(
 
   let parsedBody: unknown = null;
   let bodyEncoding: "json" | "raw" | undefined;
-  if (bodyText !== null && bodyText.length > 0) {
-    try {
-      parsedBody = JSON.parse(bodyText);
-      bodyEncoding = "json";
-    } catch {
-      // Non-JSON body: hash on the raw text directly, tagged bodyEncoding:"raw"
-      // so it can never collide with a JSON body of the same canonical shape
-      // (#57). The old `{ __raw_body__: bodyText }` wrapper collided with a
-      // literal JSON `{"__raw_body__": bodyText}` once canonicalized; storing
-      // the plain text plus the out-of-body discriminator removes the whole
-      // collision class.
+  if (bodyText !== null) {
+    if (bodyText.length > 0) {
+      try {
+        parsedBody = JSON.parse(bodyText);
+        bodyEncoding = "json";
+      } catch {
+        // Non-JSON body: hash on the raw text directly, tagged bodyEncoding:"raw"
+        // so it can never collide with a JSON body of the same canonical shape
+        // (#57). The old `{ __raw_body__: bodyText }` wrapper collided with a
+        // literal JSON `{"__raw_body__": bodyText}` once canonicalized; storing
+        // the plain text plus the out-of-body discriminator removes the whole
+        // collision class.
+        parsedBody = bodyText;
+        bodyEncoding = "raw";
+      }
+    } else {
+      // An explicit empty-string body (`fetch(url, { method: "POST", body: "" })`)
+      // is a PRESENT body — a POST with Content-Length: 0 is a different wire
+      // request than one with no body at all. The old `&& bodyText.length > 0`
+      // guard left this as `parsedBody: null` / `bodyEncoding: undefined`, byte-
+      // identical to a no-body request, so the two hash-collided and a no-body
+      // request could replay the empty-body cassette (and vice-versa). Tag it
+      // `raw` (an empty string is not valid JSON) so it stays distinct from
+      // no-body — exactly as #70 split a JSON-`null` body from a no-body request
+      // (sibling of #57/#70/#71).
       parsedBody = bodyText;
       bodyEncoding = "raw";
     }
