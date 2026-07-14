@@ -569,3 +569,14 @@ The fix iterates the header entries after the is-an-object check: it rejects any
 **Open questions / blockers:** none — PR #83 ready for review.
 
 **Next session:** Phase A merge PR for #82.
+
+## 2026-07-13 (night) — Issue #84: empty-string body collides with no-body request
+**Duration:** ~20 min · **Branch:** `session/2026-07-13-1139-issue-84` · **PR:** #85
+
+`normalizeRequest` (`fetch-recorder.ts:43`) tagged a request body only when `bodyText !== null && bodyText.length > 0`. An explicit empty-string body (`fetch(url, { method: "POST", body: "" })`) failed the `length > 0` guard, so it was left untagged (`body:null`, no `bodyEncoding`) — byte-identical to a no-body request. The two hash-collided, so a never-recorded no-body request silently replayed the empty-body cassette (and vice-versa). This is the exact wrong-cassette-replay class that #57 (raw-vs-JSON) and #70/#71 (JSON-null-vs-no-body) exist to prevent; an empty-string body is a *present* body (a POST with Content-Length: 0), and #70's `bodyEncoding` fold couldn't fire because the empty body never reached the tagging block. Fixed by tagging an empty string as `raw` (it isn't valid JSON), keeping it distinct from no-body. Verified firsthand via the public recorder/replayer API: pre-fix the no-body replay served the empty-body cassette; post-fix it correctly misses, and no-body/JSON-body hashes are unchanged so existing cassettes still replay. One end-to-end lock test; full suite (250) green, typecheck + lint clean.
+
+**Why this work, this session:** Fourth hit of the night run — the only non-empty result of a diverse-lens wave (lco aliasing, rag collision, leh aliasing/parity, aop all EMPTY) — surfaced by the ai-app sibling-incomplete-fix hunt and verified firsthand end-to-end before filing.
+
+**Open questions / blockers:** none — PR #85 ready for review.
+
+**Next session:** Phase A merge PR for #84.

@@ -173,6 +173,45 @@ describe("record then replay (non-streaming)", () => {
     });
     expect(await jsonReplay.text()).toBe("json-response");
   });
+
+  it("does not collide an explicit empty-string body with a no-body request (sibling of #57/#70)", async () => {
+    // `fetch(url, { method: "POST", body: "" })` is a PRESENT body (Content-Length:
+    // 0) — a different wire request than a no-body POST. The old `&& length > 0`
+    // guard left the empty-string body untagged (`body:null`, no bodyEncoding),
+    // byte-identical to a no-body request, so the two hash-collided: a never-
+    // recorded no-body POST silently replayed the empty-body cassette. Each must
+    // now record/replay as its own distinct cassette.
+    const emptyUpstream: typeof fetch = async () =>
+      new Response("empty-body-response", { status: 200, headers: { "content-type": "text/plain" } });
+    const noBodyUpstream: typeof fetch = async () =>
+      new Response("no-body-response", { status: 200, headers: { "content-type": "text/plain" } });
+
+    const emptyRecorder = createRecorderFetch({ upstream: emptyUpstream, store, hosts: HOSTS });
+    await emptyRecorder("https://api.anthropic.com/v1/messages", { method: "POST", body: "" });
+
+    // Before recording the no-body request, replaying it must MISS (no collision).
+    const replayer = createReplayerFetch({ store, hosts: HOSTS });
+    await expect(
+      replayer("https://api.anthropic.com/v1/messages", { method: "POST" }),
+    ).rejects.toBeInstanceOf(MissingCassetteError);
+
+    const noBodyRecorder = createRecorderFetch({ upstream: noBodyUpstream, store, hosts: HOSTS });
+    await noBodyRecorder("https://api.anthropic.com/v1/messages", { method: "POST" });
+
+    // Two distinct recordings, not one overwritten file.
+    const files = await fs.readdir(dir);
+    expect(files).toHaveLength(2);
+
+    // Each replays its own response.
+    const emptyReplay = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: "",
+    });
+    expect(await emptyReplay.text()).toBe("empty-body-response");
+
+    const noBodyReplay = await replayer("https://api.anthropic.com/v1/messages", { method: "POST" });
+    expect(await noBodyReplay.text()).toBe("no-body-response");
+  });
 });
 
 describe("record then replay (SSE streaming)", () => {
