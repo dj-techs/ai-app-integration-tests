@@ -252,6 +252,50 @@ describe("record then replay (non-streaming)", () => {
     });
     expect(await replayB.text()).toBe("form-B");
   });
+
+  it("does not collide non-Uint8Array typed-array / DataView bodies (sibling of #86/#84)", async () => {
+    // Only Uint8Array + ArrayBuffer used to be decoded; every other ArrayBufferView
+    // (Int16Array, DataView, …) dropped to `null` — byte-identical to a no-body
+    // request. Two distinct Int16Array bodies hash-collided and one replayed the
+    // other's cassette (the repo's core wrong-replay failure mode), and a view-body
+    // POST collided with a no-body POST. Each distinct view body must now record/
+    // replay as its own cassette, distinct from no-body.
+    const upstreamA: typeof fetch = async () =>
+      new Response("view-A", { status: 200, headers: { "content-type": "text/plain" } });
+    const upstreamB: typeof fetch = async () =>
+      new Response("view-B", { status: 200, headers: { "content-type": "text/plain" } });
+
+    await createRecorderFetch({ upstream: upstreamA, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST", body: new Int16Array([1, 2, 3]) },
+    );
+    // A no-body POST must MISS, not collide with the typed-array recording.
+    const replayer = createReplayerFetch({ store, hosts: HOSTS });
+    await expect(
+      replayer("https://api.anthropic.com/v1/messages", { method: "POST" }),
+    ).rejects.toBeInstanceOf(MissingCassetteError);
+
+    // A DataView carrying different bytes is its own distinct request.
+    await createRecorderFetch({ upstream: upstreamB, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST", body: new DataView(new Uint8Array([9, 9, 9]).buffer) },
+    );
+
+    const files = await fs.readdir(dir);
+    expect(files).toHaveLength(2);
+
+    const replayA = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: new Int16Array([1, 2, 3]),
+    });
+    expect(await replayA.text()).toBe("view-A");
+
+    const replayB = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: new DataView(new Uint8Array([9, 9, 9]).buffer),
+    });
+    expect(await replayB.text()).toBe("view-B");
+  });
 });
 
 describe("record then replay (SSE streaming)", () => {
