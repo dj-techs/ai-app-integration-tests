@@ -580,3 +580,14 @@ The fix iterates the header entries after the is-an-object check: it rejects any
 **Open questions / blockers:** none — PR #85 ready for review.
 
 **Next session:** Phase A merge PR for #84.
+
+## 2026-07-13 (night) — Issue #86: URLSearchParams body dropped to null → form-POST collision
+**Duration:** ~15 min · **Branch:** `session/2026-07-13-1151-issue-86` · **PR:** #87
+
+`readBodyAsText` decoded only `string`/`Uint8Array`/`ArrayBuffer` bodies; a `URLSearchParams` body (a standard `BodyInit` that `fetch` serializes as `application/x-www-form-urlencoded`) fell through to `null`, so every form POST looked like a no-body request. Two distinct form bodies (`foo=1` vs `bar=2`) hash-collided and one silently replayed the other's cassette (a false test pass — the repo's core failure mode); a form POST also collided with a no-body POST. Fixed by decoding via `body.toString()` (the exact wire bytes), so `normalizeRequest` tags it `raw` and folds it into the hash. `Blob`/`FormData`/`ReadableStream` stay a documented `null`-drop limitation (genuinely un-canonicalizable). This is the same body-discriminator collision class as #57 (raw-vs-JSON), #70/#71 (JSON-null-vs-no-body), and #84 (empty-string) — one body-type over. Verified firsthand end-to-end. One lock test; full suite (250) green, typecheck + lint clean.
+
+**Why this work, this session:** Fifth (and final) hit of the night run — a second-order self-hunt on this run's own #84 empty-string fix, hunting the remaining body-normalization edge cases and verified firsthand before filing.
+
+**Open questions / blockers:** none — PR #87 ready for review. (Independent of PR #85; trivial serial rebase at Phase-A merge time.)
+
+**Next session:** Phase A merge PR for #86 (after #84's PR #85).
