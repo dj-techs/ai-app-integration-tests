@@ -116,8 +116,21 @@ async function readBodyAsText(
 ): Promise<string | null> {
   if (body !== undefined && body !== null) {
     if (typeof body === "string") return body;
-    if (body instanceof Uint8Array) return new TextDecoder().decode(body);
     if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
+    if (ArrayBuffer.isView(body)) {
+      // Any ArrayBufferView is a standard BodyInit that fetch sends as its exact
+      // bytes: Uint8Array, but also DataView, Int8Array, Uint16Array/Int16Array,
+      // Float32Array/Float64Array, a Node Buffer, etc. Previously only Uint8Array
+      // was decoded; every OTHER view fell through to `null` (below), so a typed-
+      // array body looked byte-identical to a no-body request — two distinct
+      // Int16Array bodies hash-collided and one replayed the other's cassette, and
+      // a view-body POST collided with a no-body POST. `TextDecoder().decode`
+      // accepts any BufferSource and honors the view's byteOffset/byteLength
+      // window, so normalizeRequest tags it `bodyEncoding:"raw"` and folds it into
+      // the hash — the same collision class as #86 (URLSearchParams) / #84 (empty-
+      // string) / #70 (JSON-null) / #57 (raw/JSON), one body-type over.
+      return new TextDecoder().decode(body);
+    }
     if (body instanceof URLSearchParams) {
       // A URLSearchParams body is a standard BodyInit that fetch serializes onto
       // the wire as `application/x-www-form-urlencoded` — `toString()` is exactly
