@@ -199,8 +199,8 @@ describe("record then replay (non-streaming)", () => {
     await noBodyRecorder("https://api.anthropic.com/v1/messages", { method: "POST" });
 
     // Two distinct recordings, not one overwritten file.
-    const files = await fs.readdir(dir);
-    expect(files).toHaveLength(2);
+    const emptyFiles = await fs.readdir(dir);
+    expect(emptyFiles).toHaveLength(2);
 
     // Each replays its own response.
     const emptyReplay = await replayer("https://api.anthropic.com/v1/messages", {
@@ -211,6 +211,46 @@ describe("record then replay (non-streaming)", () => {
 
     const noBodyReplay = await replayer("https://api.anthropic.com/v1/messages", { method: "POST" });
     expect(await noBodyReplay.text()).toBe("no-body-response");
+  });
+
+  it("does not collide two distinct URLSearchParams form bodies (sibling of #57/#84)", async () => {
+    // A URLSearchParams body is a standard BodyInit that fetch serializes to
+    // `application/x-www-form-urlencoded`. `readBodyAsText` used to drop it to
+    // `null`, so every form POST looked like a no-body request: two DIFFERENT
+    // form bodies hash-collided and one replayed the other's cassette (a false
+    // test pass — the repo's core failure mode). Each distinct form body must
+    // now record/replay as its own cassette.
+    const upstreamA: typeof fetch = async () =>
+      new Response("form-A", { status: 200, headers: { "content-type": "text/plain" } });
+    const upstreamB: typeof fetch = async () =>
+      new Response("form-B", { status: 200, headers: { "content-type": "text/plain" } });
+
+    await createRecorderFetch({ upstream: upstreamA, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST", body: new URLSearchParams({ foo: "1" }) },
+    );
+    await createRecorderFetch({ upstream: upstreamB, store, hosts: HOSTS })(
+      "https://api.anthropic.com/v1/messages",
+      { method: "POST", body: new URLSearchParams({ bar: "2" }) },
+    );
+
+    // Two distinct recordings, not one overwritten file.
+    const files = await fs.readdir(dir);
+    expect(files).toHaveLength(2);
+
+    // Each replays its own response — no cross-body collision.
+    const replayer = createReplayerFetch({ store, hosts: HOSTS });
+    const replayA = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: new URLSearchParams({ foo: "1" }),
+    });
+    expect(await replayA.text()).toBe("form-A");
+
+    const replayB = await replayer("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: new URLSearchParams({ bar: "2" }),
+    });
+    expect(await replayB.text()).toBe("form-B");
   });
 });
 
