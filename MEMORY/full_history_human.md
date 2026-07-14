@@ -591,3 +591,14 @@ The fix iterates the header entries after the is-an-object check: it rejects any
 **Open questions / blockers:** none — PR #87 ready for review. (Independent of PR #85; trivial serial rebase at Phase-A merge time.)
 
 **Next session:** Phase A merge PR for #86 (after #84's PR #85).
+
+## 2026-07-14 (night) — Issue #88: non-Uint8Array typed-array bodies dropped to null → cassette collision
+**Duration:** ~20 min · **Branch:** `session/2026-07-14-0516-issue-88` · **PR:** #89
+
+`readBodyAsText` (`fetch-recorder.ts`) decoded only `Uint8Array` and `ArrayBuffer` bodies; every other `ArrayBufferView` — `DataView`, `Int8Array`, `Uint16Array`/`Int16Array`, `Float32Array`/`Float64Array`, a Node `Buffer`, etc. — fell through to `null`, byte-identical to a no-body request. Two distinct `Int16Array` bodies hash-collided and one replayed the other's cassette (the repo's core wrong-replay failure mode), and a view-body POST collided with a no-body POST. All of these are standard `BodyInit`s that `fetch` sends as their exact deterministic bytes, so — unlike `Blob`/`FormData`/`ReadableStream` (the documented un-canonicalizable out-of-scope limitation) — they can and should be hashed. Fixed by decoding any `ArrayBuffer.isView(body)` via `TextDecoder` (honoring the view's `byteOffset`/`byteLength`), so `normalizeRequest` tags it `raw` and folds it into the hash. This is the same body-discriminator collision class as #57 (raw-vs-JSON), #70/#71 (JSON-null), #84 (empty-string), and #86 (URLSearchParams) — one body-type over. Verified firsthand via a `tsx` repro: pre-fix two distinct `Int16Array` bodies wrote one cassette and replay served the wrong response; post-fix each records/replays its own and a no-body request correctly misses. One lock test; full suite (252) green, typecheck + lint clean.
+
+**Why this work, this session:** First hit of the night run — surfaced by the ai-app body-collision sibling hunt on this run's own #84/#86 fixes and verified firsthand end-to-end before filing.
+
+**Open questions / blockers:** none — PR #89 ready for review.
+
+**Next session:** Phase A merge PR for #88.
